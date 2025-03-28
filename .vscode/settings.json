@@ -1,0 +1,9 @@
+{
+    "makefile.launchConfigurations": [
+        {
+            "cwd": "/home/romaric/Documents/prog_graphique/test_simulation_eau",
+            "binaryPath": "/home/romaric/Documents/prog_graphique/test_simulation_eau/calculGPU",
+            "binaryArgs": []
+        }
+    ]
+}
