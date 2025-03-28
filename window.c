@@ -31,6 +31,7 @@
 typedef struct {
     float x, y, z;
     float w, h, d;
+    float angle_x; // Angle de rotation sur l'axe x
 } rect3d_t;
 
 //tableau dynamique global
@@ -68,7 +69,7 @@ struct vec3d_t
 //};
 
 //temps de simulation
-static float TIME_SCALE = 1.0f;  // 1.0 = vitesse normale, 0.5 = demi-vitesse
+static float TIME_SCALE = 1.00f;  // 1.0 = vitesse normale, 0.5 = demi-vitesse
 
 
 static void init(void);
@@ -180,9 +181,8 @@ void rect_init_list(int capacity) {
     _rects = (rect3d_t*)malloc(_max_rects * sizeof(rect3d_t));
     _nb_rects = 0;
 }
-
 // Ajoute un rectangle à la liste
-void rect_add(float x, float y, float z, float w, float h, float d) {
+void rect_add(float x, float y, float z, float w, float h, float d, float angle_x) {
     if (_nb_rects >= _max_rects) return; // ou agrandir dynamiquement
     _rects[_nb_rects].x = x;
     _rects[_nb_rects].y = y;
@@ -190,56 +190,88 @@ void rect_add(float x, float y, float z, float w, float h, float d) {
     _rects[_nb_rects].w = w;
     _rects[_nb_rects].h = h;
     _rects[_nb_rects].d = d;
+    _rects[_nb_rects].angle_x = angle_x; // Ajout de l'angle de rotation sur l'axe x
     _nb_rects++;
+}
+
+// Test collision (2D) d'une particule (mobile_t) avec un rectangle avec rotation
+static void collide_with_rotated_rect(mobile_t* m, const rect3d_t* r, float e) {
+    // Translate the particle's position to the rectangle's local space
+    float localX = m->p.x - r->x;
+    float localY = m->p.y - r->y;
+
+    // Apply rotation
+    float cosAngle = cosf(r->angle_x);
+    float sinAngle = sinf(r->angle_x);
+    float rotatedX = cosAngle * localX + sinAngle * localY;
+    float rotatedY = -sinAngle * localX + cosAngle * localY;
+
+    // Check if the rotated coordinate is within the rectangle's bounds
+    if (rotatedX >= 0.0f && rotatedX <= r->w &&
+        rotatedY >= 0.0f && rotatedY <= r->h) {
+        
+        // Correct the particle's position to push it outside the rectangle
+        if (rotatedY < r->h / 2.0f) {
+            rotatedY = -m->r; // Push below
+        } else {
+            rotatedY = r->h + m->r; // Push above
+        }
+
+        // Apply inverse rotation to return to global space
+        float correctedX = cosAngle * rotatedX - sinAngle * rotatedY;
+        float correctedY = sinAngle * rotatedX + cosAngle * rotatedY;
+
+        // Update the particle's position and velocity
+        m->p.x = correctedX + r->x;
+        m->p.y = correctedY + r->y;
+        m->v.y = -m->v.y * e;
+    }
 }
 
 // Dessine tous les rectangles en utilisant le shader program
 void rect_draw_all(void) {
-    GLfloat *rect_data = malloc(4 * _nb_rects * sizeof *rect_data);
+    GLfloat *rect_data = malloc(4 * _nb_rects * sizeof *rect_data); //4 pour x,y,w,h
     assert(rect_data);
+    
     for (int i = 0; i < _nb_rects; ++i) {
         rect_data[4 * i + 0] = _rects[i].x;
         rect_data[4 * i + 1] = _rects[i].y;
         rect_data[4 * i + 2] = _rects[i].w;
         rect_data[4 * i + 3] = _rects[i].h;
     }
-
+    // Set up an attribute for angles if needed
+    glUseProgram(_pId);
+    //allocation séparée pour les angles
+    float *angles = malloc(_nb_rects * sizeof(float));
+    assert(angles);
+    for (int i = 0; i < _nb_rects; ++i) {
+        angles[i] = _rects[i].angle_x;
+    }
+    glUniform1fv(glGetUniformLocation(_pId, "rect_angles"), _nb_rects, angles);
     glUseProgram(_pId);
     glUniform4fv(glGetUniformLocation(_pId, "rectangles"), _nb_rects, rect_data);
     glUniform1i(glGetUniformLocation(_pId, "nb_rects"), _nb_rects);
 
     // Set the color to white
     glUniform4f(glGetUniformLocation(_pId, "rect_color"), 1.0f, 1.0f, 1.0f, 1.0f);
-
+    for (int i = 0; i < _nb_mobiles; ++i) {
+        for (int j = 0; j < _nb_rects; ++j) {
+            collide_with_rotated_rect(&_mobiles[i], &_rects[j], e);
+        }
+    }
     gl4dgDraw(_quad);
     glUseProgram(0);
 
     free(rect_data);
+    free(angles);
 }
 
-// Test collision (2D) d'une particule (mobile_t) avec un rectangle
-static void collide_with_rect(mobile_t* m, const rect3d_t* r, float e) {
-    // Sides du rectangle
-    float left   = r->x;
-    float right  = r->x + r->w;
-    float bottom = r->y;
-    float top    = r->y + r->h;
-    
-    // Approx simple : si la sphère (particule) intersecte la zone du rectangle
-    if (m->p.x + m->r >= left && m->p.x - m->r <= right &&
-        m->p.y + m->r >= bottom && m->p.y - m->r <= top) {
-        // Placée au-dessus
-        m->p.y = top + m->r;
-        // Inverser la vitesse en Y (rebond simple)
-        m->v.y = -m->v.y * e;
-    }
-}
 
 // Appeler cette fonction dans mobile_simu après mise à jour des particules
 void rect_collide_all(mobile_t* mobiles, int nb, float e) {
     for (int i = 0; i < nb; i++) {
         for (int j = 0; j < _nb_rects; j++) {
-            collide_with_rect(&mobiles[i], &_rects[j], e);
+            collide_with_rotated_rect(&mobiles[i], &_rects[j], e);
         }
     }
 }
@@ -303,7 +335,6 @@ void build_spatial_grid() {
 void compute_sph_forces() {
     // Construire la grille spatiale
     build_spatial_grid();
-    
     // Calculer les densités et pressions
     for (int i = 0; i < _nb_mobiles; i++) {
         _mobiles[i].density = 0.0f;
@@ -484,13 +515,14 @@ void init(void){
 	/* créer un programme GPU pour OpenGL (en GL4D) */
 	_pId = gl4duCreateProgram("<vs>shaders/identity.vs", "<fs>shaders/calculs.fs", NULL);
 
-	mobile_init(900);
+	mobile_init(1023);
     //les rectangles
     rect_init_list(3); //la liste de rectangles
-    rect_add(-0.1f, -0.1f, 0.0f, 0.10f, 0.10f, 0.10f); // Rectangle 1
-    rect_add(0.1f, -0.1f, 0.0f, 0.10f, 0.10f, 0.10f); // Rectangle 2
-    rect_add(-0.1f, 0.1f, 0.0f, 0.10f, 0.10f, 0.10f); // Rectangle 3
+    rect_add(0.50f, -0.0f, 0.0f, 1.10f, 0.10f, 0.10f, -3.01f); // Rectangle 1
+    rect_add(0.4f, -0.1f, 0.0f, 0.10f, 1.10f, 0.10f, 0.0f); // Rectangle 2
+    rect_add(-0.1f, 0.5f, 0.0f, 1.0f, 0.10f, 0.10f, 3.0f); // Rectangle 3
 }
+
 
 void draw(void){
 	/* effacer le buffer de couleur (image) et le buffer de profondeur d'OpenGL */
@@ -519,7 +551,37 @@ void mobile_init(int n){
     _nb_mobiles = n;
     _mobiles = malloc(_nb_mobiles * sizeof *_mobiles);
     assert(_mobiles);
-    
+    // Créer une forme de carré pour l'initialisation
+    float start_x = -0.5f;
+    float start_y = 0.5f;
+    float width = 0.6f;
+    float height = 0.6f;
+    float spacing = 0.05f;
+
+    int index = 0;
+    for (float y = start_y; y <= start_y + height && index < n; y += spacing) {
+        for (float x = start_x; x <= start_x + width && index < n; x += spacing) {
+            _mobiles[index].p.x = x;
+            _mobiles[index].p.y = y;
+            _mobiles[index].p.z = 0.0f;
+            _mobiles[index].v.x = 0.0f;
+            _mobiles[index].v.y = 0.0f;
+            _mobiles[index].v.z = 0.0f;
+            _mobiles[index].r = 0.01f;
+            _mobiles[index].density = REST_DENSITY;
+            _mobiles[index].pressure = 0.0f;
+            _mobiles[index].force.x = 0.0f;
+            _mobiles[index].force.y = 0.0f;
+            _mobiles[index].force.z = 0.0f;
+            _mobiles[index].color[0] = 0.0f;
+            _mobiles[index].color[1] = 0.4f;
+            _mobiles[index].color[2] = 0.8f;
+            _mobiles[index].color[3] = 1.0f;
+            index++;
+        }
+    }
+
+    /*
     // Créer une forme de "goutte d'eau" pour l'initialisation
     float center_x = -0.5f;
     float center_y = 0.7f;
@@ -554,6 +616,7 @@ void mobile_init(int n){
             }
         }
     }
+    */
     
     // Si on n'a pas assez de particules, remplir le reste
     for (int i = index; i < n; i++) {
@@ -563,7 +626,7 @@ void mobile_init(int n){
         _mobiles[i].v.x = 0.0f;
         _mobiles[i].v.y = 0.0f;
         _mobiles[i].v.z = 0.0f;
-        _mobiles[i].r = 0.02f;
+        _mobiles[i].r = 0.01f;
         _mobiles[i].density = REST_DENSITY;
         _mobiles[i].pressure = 0.0f;
         _mobiles[i].force.x = 0.0f;
@@ -607,7 +670,7 @@ void mobile_simu(void){
 	//const float max_speed = 0.5f; // Vitesse maximale autorisée
 
 	// Calculer les forces SPH
-	compute_sph_forces();
+    compute_sph_forces();
 	for (int i = 0; i < _nb_mobiles; ++i) {
         // Intégration explicite d'Euler
         float accel_x = _mobiles[i].force.x / _mobiles[i].density;
