@@ -10,6 +10,7 @@
 #include <GL4D/gl4duw_SDL2.h>
 #include <GL4D/gl4dm.h>
 #include <GL4D/gl4dg.h>
+#include <stdlib.h>
 #include <math.h>
 
 #define MAX_NEIGHBOURS 64
@@ -26,11 +27,24 @@
 #define VISC_LAP (45.0f / (M_PI * powf(H, 6)))
 #define SURFACE_TENSION 0.0728f
 
+//pour les rectangles 3D
+typedef struct {
+    float x, y, z;
+    float w, h, d;
+} rect3d_t;
+
+//tableau dynamique global
+static rect3d_t* _rects = NULL;  
+static int _nb_rects   = 0;     
+static int _max_rects  = 0;     
+
+
 //struct pour la grille spatiale
 typedef struct {
     int start_index;
     int count;
 } spatial_cell_t;
+
 
 //variables globales pour l'optimisation
 static spatial_cell_t* _grid = NULL;
@@ -158,6 +172,88 @@ float kernel_viscosity_improved(float r, float h) {
     float q = r / h;
     return (h / r) * (1.0f - q);
 }
+
+//les rectangles
+void rect_init_list(int capacity) {
+    if (_rects) free(_rects);
+    _max_rects = capacity;
+    _rects = (rect3d_t*)malloc(_max_rects * sizeof(rect3d_t));
+    _nb_rects = 0;
+}
+
+// Ajoute un rectangle à la liste
+void rect_add(float x, float y, float z, float w, float h, float d) {
+    if (_nb_rects >= _max_rects) return; // ou agrandir dynamiquement
+    _rects[_nb_rects].x = x;
+    _rects[_nb_rects].y = y;
+    _rects[_nb_rects].z = z;
+    _rects[_nb_rects].w = w;
+    _rects[_nb_rects].h = h;
+    _rects[_nb_rects].d = d;
+    _nb_rects++;
+}
+
+// Dessine tous les rectangles en utilisant le shader program
+void rect_draw_all(void) {
+    GLfloat *rect_data = malloc(4 * _nb_rects * sizeof *rect_data);
+    assert(rect_data);
+    for (int i = 0; i < _nb_rects; ++i) {
+        rect_data[4 * i + 0] = _rects[i].x;
+        rect_data[4 * i + 1] = _rects[i].y;
+        rect_data[4 * i + 2] = _rects[i].w;
+        rect_data[4 * i + 3] = _rects[i].h;
+    }
+
+    glUseProgram(_pId);
+    glUniform4fv(glGetUniformLocation(_pId, "rectangles"), _nb_rects, rect_data);
+    glUniform1i(glGetUniformLocation(_pId, "nb_rects"), _nb_rects);
+
+    // Set the color to white
+    glUniform4f(glGetUniformLocation(_pId, "rect_color"), 1.0f, 1.0f, 1.0f, 1.0f);
+
+    gl4dgDraw(_quad);
+    glUseProgram(0);
+
+    free(rect_data);
+}
+
+// Test collision (2D) d'une particule (mobile_t) avec un rectangle
+static void collide_with_rect(mobile_t* m, const rect3d_t* r, float e) {
+    // Sides du rectangle
+    float left   = r->x;
+    float right  = r->x + r->w;
+    float bottom = r->y;
+    float top    = r->y + r->h;
+    
+    // Approx simple : si la sphère (particule) intersecte la zone du rectangle
+    if (m->p.x + m->r >= left && m->p.x - m->r <= right &&
+        m->p.y + m->r >= bottom && m->p.y - m->r <= top) {
+        // Placée au-dessus
+        m->p.y = top + m->r;
+        // Inverser la vitesse en Y (rebond simple)
+        m->v.y = -m->v.y * e;
+    }
+}
+
+// Appeler cette fonction dans mobile_simu après mise à jour des particules
+void rect_collide_all(mobile_t* mobiles, int nb, float e) {
+    for (int i = 0; i < nb; i++) {
+        for (int j = 0; j < _nb_rects; j++) {
+            collide_with_rect(&mobiles[i], &_rects[j], e);
+        }
+    }
+}
+
+// Libère la liste
+void rect_cleanup(void) {
+    if (_rects) {
+        free(_rects);
+        _rects = NULL;
+    }
+    _nb_rects = 0;
+    _max_rects = 0;
+}
+
 
 // Fonction pour construire la grille spatiale
 void build_spatial_grid() {
@@ -388,7 +484,12 @@ void init(void){
 	/* créer un programme GPU pour OpenGL (en GL4D) */
 	_pId = gl4duCreateProgram("<vs>shaders/identity.vs", "<fs>shaders/calculs.fs", NULL);
 
-	mobile_init(1024);
+	mobile_init(900);
+    //les rectangles
+    rect_init_list(3); //la liste de rectangles
+    rect_add(-0.1f, -0.1f, 0.0f, 0.10f, 0.10f, 0.10f); // Rectangle 1
+    rect_add(0.1f, -0.1f, 0.0f, 0.10f, 0.10f, 0.10f); // Rectangle 2
+    rect_add(-0.1f, 0.1f, 0.0f, 0.10f, 0.10f, 0.10f); // Rectangle 3
 }
 
 void draw(void){
@@ -400,6 +501,7 @@ void draw(void){
 	   matrice view */
 
 	mobile_draw();
+    rect_draw_all();
 
 	/* n'utiliser aucun programme GPU (pas nécessaire) */
 	glUseProgram(0);
@@ -492,6 +594,8 @@ void mobile_init(int n){
 //	}
 	
 }
+
+
 
 void mobile_simu(void){
 	static double t0 = 0;
@@ -611,6 +715,7 @@ void mobile_simu(void){
 			}
 		}
 	}
+    rect_collide_all(_mobiles, _nb_mobiles, e);
 }
 	/*
 	const float seuil_collision = 0.05f; // seuil de vitesse pour la collision
@@ -824,6 +929,7 @@ void mobile_quit(void) {
         free(_particle_indices);
         _particle_indices = NULL;
     }
+    rect_cleanup();
 }
 /*
 void mobile_quit(void){
