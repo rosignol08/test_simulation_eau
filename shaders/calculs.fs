@@ -1,8 +1,8 @@
 #version 330
 out vec4 fragColor;
 in vec2 fcoord;
-uniform vec4 positions[256];
-uniform vec4 couleurs[256];
+uniform vec4 positions[1024];
+uniform vec4 couleurs[1024];
 uniform int nbe;
 
 void main() {

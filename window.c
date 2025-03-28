@@ -82,8 +82,8 @@ static const float REST_DENSITY = 1000.0f;  // Densité au repos du fluide
 static const float GAS_CONSTANT = 2000.0f;  // Constante des gaz parfaits
 static const float VISCOSITY = 10.0f;      // Viscosité du fluide
 static const float MASS = 1.0f;             // Masse d'une particule
-static const float H = 0.105f;                // Rayon de lissage (smoothing radius)
-static const float H2 = 0.0064f;              // H²
+static const float H = 0.11f;                // Rayon de lissage (smoothing radius)
+static const float H2 = 0.0075f;              // H²
 //static const float POLY6 = 315.0f / (64.0f * M_PI * powf(H, 9));
 //static const float SPIKY_GRAD = -45.0f / (M_PI * powf(H, 6));
 //static const float VISC_LAP = 45.0f / (M_PI * powf(H, 6));
@@ -388,7 +388,7 @@ void init(void){
 	/* créer un programme GPU pour OpenGL (en GL4D) */
 	_pId = gl4duCreateProgram("<vs>shaders/identity.vs", "<fs>shaders/calculs.fs", NULL);
 
-	mobile_init(400);
+	mobile_init(1024);
 }
 
 void draw(void){
