@@ -69,7 +69,7 @@ struct vec3d_t
 //};
 
 //temps de simulation
-static float TIME_SCALE = 1.00f;  // 1.0 = vitesse normale, 0.5 = demi-vitesse
+static float TIME_SCALE = 100.0f;  //vitesse de simulation
 
 
 static void init(void);
@@ -87,13 +87,13 @@ GLuint _pId = 0;
 GLuint _quad = 0;
 
 /* gravité */
-static GLfloat _ig = 9.81f / 2.0f;
-static vec3d_t _g = {0.0f, -98.1f, 0.0f}; // Modification ici: définir la gravité vers le bas à -9.81f
+//static GLfloat _ig = 9.81f / 2.0f;
+static vec3d_t _g = {0.0f, -9.81f, 0.0f}; // Modification ici: définir la gravité vers le bas à -9.81f
 static const GLfloat e = 0.5f; //8.0f / 9.0f;
 
 /* simulation d'eau de jsp qui */
 // Ajouter ces paramètres SPH
-static const float REST_DENSITY = 1000.0f;  // Densité au repos du fluide
+static const float REST_DENSITY = 10.0f;  // Densité au repos du fluide
 static const float GAS_CONSTANT = 2000.0f;  // Constante des gaz parfaits
 static const float VISCOSITY = 10.0f;      // Viscosité du fluide
 static const float MASS = 1.0f;             // Masse d'une particule
@@ -252,7 +252,7 @@ void rect_draw_all(void) {
     glUniform4fv(glGetUniformLocation(_pId, "rectangles"), _nb_rects, rect_data);
     glUniform1i(glGetUniformLocation(_pId, "nb_rects"), _nb_rects);
 
-    // Set the color to white
+    //set la couleur en blanc
     glUniform4f(glGetUniformLocation(_pId, "rect_color"), 1.0f, 1.0f, 1.0f, 1.0f);
     for (int i = 0; i < _nb_mobiles; ++i) {
         for (int j = 0; j < _nb_rects; ++j) {
@@ -381,7 +381,7 @@ void compute_sph_forces() {
 		    _mobiles[i].pressure = GAS_CONSTANT * (powf(density_ratio, 4) - 1.0f);
 		} else {
 		    // Pression négative (attractive) si densité < REST_DENSITY, mais plus faible
-		    _mobiles[i].pressure = GAS_CONSTANT * 0.2f * (density_ratio - 1.0f);
+		    _mobiles[i].pressure = GAS_CONSTANT * 2.0f * (density_ratio - 1.0f);
 		}
 		//float density_ratio = _mobiles[i].density / REST_DENSITY;
         //_mobiles[i].pressure = GAS_CONSTANT * (powf(density_ratio, 7) - 1.0f);
@@ -391,6 +391,7 @@ void compute_sph_forces() {
             _mobiles[i].pressure = GAS_CONSTANT * 10.0f;
         if (_mobiles[i].pressure < -GAS_CONSTANT)
             _mobiles[i].pressure = -GAS_CONSTANT;
+        
     }
     
     // Calculer les forces
@@ -427,7 +428,7 @@ void compute_sph_forces() {
                         // Force de pression
                         float pressure_factor = -MASS * (_mobiles[i].pressure + _mobiles[j].pressure) / 
                                                (2.0f * _mobiles[j].density) * kernel_spiky_gradient(r);
-                        
+                        //printf("Pressure factor: %f\n", pressure_factor);
                         _mobiles[i].force.x += pressure_factor * dx / r;
                         _mobiles[i].force.y += pressure_factor * dy / r;
                         
@@ -437,7 +438,7 @@ void compute_sph_forces() {
                                          //kernel_viscosity_laplacian(r) / _mobiles[j].density;
 										 kernel_viscosity_improved(r, H);
                         
-                        _mobiles[i].force.x += visc_factor;
+                        _mobiles[i].force.x += visc_factor*0.1f;
                         
                         visc_factor = VISCOSITY * MASS * 
                                    (_mobiles[j].v.y - _mobiles[i].v.y) * 
@@ -450,57 +451,55 @@ void compute_sph_forces() {
 						if (r < min_distance * 1.5f) {
 						    // Première couche - très forte répulsion si presque en contact
 						    if (r < min_distance * 1.1f) {
-						        float repulsion_strength = 5000.0f * (min_distance * 1.1f - r) / min_distance;
+						        float repulsion_strength = 50.0f * (min_distance * 1.1f - r) / min_distance;
 						        _mobiles[i].force.x += repulsion_strength * dx / r;
 						        _mobiles[i].force.y += repulsion_strength * dy / r;
 						    } 
 						    // Deuxième couche - répulsion plus douce
 						    else {
-						        float repulsion_strength = 500.0f * (min_distance * 1.5f - r) / min_distance;
+						        float repulsion_strength = 5.0f * (min_distance * 1.5f - r) / min_distance;
 						        _mobiles[i].force.x += repulsion_strength * dx / r;
 						        _mobiles[i].force.y += repulsion_strength * dy / r;
 						    }
 						}
-						//float min_distance = _mobiles[i].r + _mobiles[j].r;
-						//if (r < min_distance) {
-						//	float repulsion_strength = 1000.0f * (min_distance - r) / min_distance;
-						//	_mobiles[i].force.x += repulsion_strength * dx / r;
-						//	_mobiles[i].force.y += repulsion_strength * dy / r;
-						//}
+						min_distance = _mobiles[i].r + _mobiles[j].r;
+						if (r < min_distance) {
+							float repulsion_strength = 10.0f * (min_distance - r) / min_distance;
+							_mobiles[i].force.x += repulsion_strength * dx / r;
+							_mobiles[i].force.y += repulsion_strength * dy / r;
+						}
 						
 						// Limiter la densité
 						if (_mobiles[i].density > REST_DENSITY * 2.0f) {
 							_mobiles[i].v.x *= 0.5f;
 							_mobiles[i].v.y *= 0.5f;
 						}
-						//if (r < min_distance * 1.5f) {
-						//    float repulsion_strength = 200.0f * (min_distance * 1.5f - r) / min_distance;
-						//    _mobiles[i].force.x -= repulsion_strength * dx / r;
-						//    _mobiles[i].force.y -= repulsion_strength * dy / r;
-						//}
+						if (r < min_distance * 1.5f) {
+						    float repulsion_strength = 2.0f * (min_distance * 1.5f - r) / min_distance;
+						    _mobiles[i].force.x -= repulsion_strength * dx / r;
+						    _mobiles[i].force.y -= repulsion_strength * dy / r;
+						}
                     }
                 }
             }
         }
-        
-        // Ajouter la gravité
-        //_mobiles[i].force.x += _g.x * _mobiles[i].density * 1.0f;
-        //_mobiles[i].force.y += _g.y * _mobiles[i].density * 1.0f;
 		//limiter leur magnitude
         float force_magnitude = sqrtf(_mobiles[i].force.x * _mobiles[i].force.x + 
                                      _mobiles[i].force.y * _mobiles[i].force.y);
-        const float max_force = 5000.0f;
+        const float max_force = 1000.0f;
         
         if (force_magnitude > max_force) {
             float scale = max_force / force_magnitude;
             _mobiles[i].force.x *= scale;
             _mobiles[i].force.y *= scale;
         }
-		//_mobiles[i].force.x += _g.x * _mobiles[i].density * 0.20f;
-		//_mobiles[i].force.y += _g.y * _mobiles[i].density * 0.20f;
-		_mobiles[i].force.x += _g.x * MASS * 100.0f;  // Indépendant de la densité
-		_mobiles[i].force.y += _g.y * MASS * 100.0f;  // Indépendant de la densité
-
+        _mobiles[i].force.x *= 0.1f;
+        _mobiles[i].force.y *= 0.1f;
+		_mobiles[i].force.x += _g.x * _mobiles[i].density * 0.70f;
+		_mobiles[i].force.y += _g.y * _mobiles[i].density * 0.70f;
+		//_mobiles[i].force.x += _g.x;  // Indépendant de la densité
+		//_mobiles[i].force.y += _g.y;  // Indépendant de la densité
+        //printf("Force: (%f, %f)\n", _mobiles[i].force.x, _mobiles[i].force.y);
     }
 }
 /*fin fonction de ouf*/
@@ -662,15 +661,20 @@ void mobile_init(int n){
 
 void mobile_simu(void){
 	static double t0 = 0;
-	double t = gl4dGetElapsedTime() / 1000.0, dt = (t - t0) * TIME_SCALE;
+	double t = gl4dGetElapsedTime() / 1000.0, dt = (t - t0) * 30.0;
 	//double t = gl4dGetElapsedTime() / 1000.0, dt = t - t0;
 	t0 = t;
 
 	if (dt > 0.03f) dt = 0.03f; // Limiter le pas de temps à 30 ms
 	//const float max_speed = 0.5f; // Vitesse maximale autorisée
-
+    //printf("dt: %f\n", dt);
 	// Calculer les forces SPH
     compute_sph_forces();
+    for (int i = 0; i < _nb_mobiles; ++i) {
+        _mobiles[i].force.x *= dt*TIME_SCALE;
+        _mobiles[i].force.y *= dt*TIME_SCALE;
+        _mobiles[i].force.z *= dt*TIME_SCALE;
+    }
 	for (int i = 0; i < _nb_mobiles; ++i) {
         // Intégration explicite d'Euler
         float accel_x = _mobiles[i].force.x / _mobiles[i].density;

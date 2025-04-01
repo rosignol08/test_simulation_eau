@@ -16,7 +16,8 @@ void main() {
   for (int i = 0; i < nb_rects; i++) {
     vec4 rect = rectangles[i];
     float angle = rect_angles[i];
-    vec2 center = rect.xy;// + vec2(rect.z / 2.0, rect.w / 2.0); // centre du rectangle
+    // + vec2(rect.z / 2.0, rect.w / 2.0); // centre du rectangle
+    vec2 center = rect.xy;
     // Translate the fragment coordinate to the rectangle's local space
     vec2 localCoord = fcoord - center;
 
@@ -38,8 +39,17 @@ void main() {
   }
   //sinon 
   for (int i = 0; i < nbe; ++i) {
-    if(distance(positions[i].xy, fcoord) < positions[i].z /* le rayon du mobile i */) {
-      fragColor = couleurs[i];
+    float dist = distance(positions[i].xy, fcoord);
+    float radius = positions[i].z; // le rayon du mobile i
+    
+    if(dist < radius) {
+      // Soft edge effect: 1.0 at center, fading towards edge
+      float softness = 0.01; // Adjust this value to control blur amount (0.0-1.0)
+      float alpha = smoothstep(radius, radius * (1.0 - softness), dist);
+      
+      // Mix with background color based on alpha
+      vec4 bgColor = vec4(0.0, 0.0, 1.0, 1.0); // The background color
+      fragColor = mix(bgColor, couleurs[i], alpha);
       return;
     }      
   }
