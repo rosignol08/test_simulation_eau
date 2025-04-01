@@ -971,6 +971,7 @@ void mobile_draw(void){
 			tmp[4 * i + j] = _mobiles[i].color[j];
 	glUniform4fv(glGetUniformLocation(_pId, "couleurs"), _nb_mobiles, tmp);
 	glUniform1i(glGetUniformLocation(_pId, "nbe"), _nb_mobiles);
+	//TODO met le scatering et blur
 	gl4dgDraw(_quad);
 	free(tmp);
 }
