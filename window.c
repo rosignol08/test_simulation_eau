@@ -93,7 +93,7 @@ static const GLfloat e = 0.5f; //8.0f / 9.0f;
 
 /* simulation d'eau de jsp qui */
 // Ajouter ces paramètres SPH
-static const float REST_DENSITY = 10.0f;  // Densité au repos du fluide
+static const float REST_DENSITY = 300.0f;  // Densité au repos du fluide
 static const float GAS_CONSTANT = 2000.0f;  // Constante des gaz parfaits
 static const float VISCOSITY = 10.0f;      // Viscosité du fluide
 static const float MASS = 1.0f;             // Masse d'une particule
@@ -343,7 +343,7 @@ void compute_sph_forces() {
         _mobiles[i].density += MASS * kernel_poly6(0.0f);
         
         // Contribution des voisins
-        int cell_id = _mobiles[i].cell_id;
+        //int cell_id = _mobiles[i].cell_id;
         
         // Parcourir les 9 cellules voisines (en 2D)
         for (int offsetY = -1; offsetY <= 1; offsetY++) {
@@ -396,11 +396,8 @@ void compute_sph_forces() {
     
     // Calculer les forces
     for (int i = 0; i < _nb_mobiles; i++) {
-        _mobiles[i].force.x = 0.0f;
-        _mobiles[i].force.y = 0.0f;
-        _mobiles[i].force.z = 0.0f;
         
-        int cell_id = _mobiles[i].cell_id;
+        //int cell_id = _mobiles[i].cell_id;
         
         // Parcourir les 9 cellules voisines
         for (int offsetY = -1; offsetY <= 1; offsetY++) {
@@ -636,25 +633,6 @@ void mobile_init(int n){
         _mobiles[i].color[2] = 0.8f;
         _mobiles[i].color[3] = 1.0f;
     }
-	/*
-	assert(_mobiles == NULL);
-	_nb_mobiles = n;
-	_mobiles = malloc(_nb_mobiles * sizeof *_mobiles);
-	assert(_mobiles);
-	for (int i = 0; i < _nb_mobiles; ++i){
-		_mobiles[i].p.x = 0.89f * gl4dmSURand();
-		_mobiles[i].p.y = 0.89f * gl4dmSURand() + 0.1f; // spawn les balles plus haut
-		_mobiles[i].p.z = 0.0f;							// 0.89f * gl4dmSURand(); /* Ajout de la coordonnée z */
-//		_mobiles[i].v.x = gl4dmSURand() * 0.5f;			// plus rapide au début
-//		_mobiles[i].v.y = gl4dmSURand() * 0.5f;							// gl4dmSURand() * 0.5f; //plus rapide au début
-//		_mobiles[i].v.z = 0.0f; 			/* Vitesse initiale en z */
-//		_mobiles[i].r = 0.02f; //taille uniforme //0.01f + 0.1f * gl4dmURand();
-//		_mobiles[i].color[0] = gl4dmURand();
-//		_mobiles[i].color[1] = gl4dmURand();
-//		_mobiles[i].color[2] = gl4dmURand();
-//		_mobiles[i].color[3] = 1.0f;
-//	}
-	
 }
 
 
@@ -662,12 +640,9 @@ void mobile_init(int n){
 void mobile_simu(void){
 	static double t0 = 0;
 	double t = gl4dGetElapsedTime() / 1000.0, dt = (t - t0) * 30.0;
-	//double t = gl4dGetElapsedTime() / 1000.0, dt = t - t0;
 	t0 = t;
 
 	if (dt > 0.03f) dt = 0.03f; // Limiter le pas de temps à 30 ms
-	//const float max_speed = 0.5f; // Vitesse maximale autorisée
-    //printf("dt: %f\n", dt);
 	// Calculer les forces SPH
     compute_sph_forces();
     for (int i = 0; i < _nb_mobiles; ++i) {
