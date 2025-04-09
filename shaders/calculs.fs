@@ -4,11 +4,12 @@ in vec2 fcoord;
 uniform vec4 positions[1024];
 uniform vec4 couleurs[1024];
 uniform int nbe;
+uniform int space_mode; //pour détecter le mode spatial
 
-uniform vec4 rectangles[10]; // Rectangles : (x, y, largeur, hauteur)
+uniform vec4 rectangles[8]; // Rectangles : (x, y, largeur, hauteur)
 uniform vec4 rect_color;       // Couleur des rectangles
 uniform int nb_rects;          // Nombre de rectangles
-uniform float rect_angles[10]; // Angles des rectangles
+uniform float rect_angles[8]; // Angles des rectangles
 
 void main() {
   //fragColor = vec4(gl_FragCoord.xy / 600.0, 0.0, 1.0);

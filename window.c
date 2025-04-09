@@ -21,7 +21,7 @@
 #define G_CONSTANT 6.67430e-3  // Constante gravitationnelle modifiée pour l'échelle de la simulation
 #define MIN_DISTANCE 0.01f     // Distance minimale pour éviter les accélérations infinies
 static int SPACE_MODE = 1;    // 0 = mode eau normal, 1 = mode espace gravitationnel
-
+float vitesse = 1.0f;
 #ifndef M_PI
 	#define M_PI 3.14159265358979323846
 #endif
@@ -74,7 +74,7 @@ struct vec3d_t
 //};
 
 //temps de simulation
-static float TIME_SCALE = 100.0f;  //vitesse de simulation
+static float TIME_SCALE = 10.0f;  //vitesse de simulation
 
 
 static void init(void);
@@ -86,6 +86,8 @@ static void mobile_simu(void);
 static void mobile_draw(void);
 static void mobile_quit(void);
 
+static void mobile_simu_with_mode_selection(void);
+
 /* on créé une variable pour stocker l'identifiant du programme GPU */
 GLuint _pId = 0;
 
@@ -93,7 +95,7 @@ GLuint _quad = 0;
 
 /* gravité */
 //static GLfloat _ig = 9.81f / 2.0f;
-static vec3d_t _g = {0.0f, -9.81f, 0.0f}; // Modification ici: définir la gravité vers le bas à -9.81f
+static vec3d_t _g = {0.0f, 0.0f, 0.0f}; // Modification ici: définir la gravité vers le bas à -9.81f
 static const GLfloat e = 0.5f; //8.0f / 9.0f;
 
 /* simulation d'eau de jsp qui */
@@ -148,6 +150,7 @@ int main(int argc, char **argv){
 	atexit(quit);
 	/* placer mobile_simu comme fonction à appeler à idle (simulation) */
 	gl4duwIdleFunc(mobile_simu);
+    //gl4duwIdleFunc(mobile_simu_with_mode_selection);
 	/* placer draw comme fonction à appeler pour dessiner chaque frame */
 	gl4duwDisplayFunc(draw);
 	/* boucle infinie pour éviter que le programme ne s'arrête et ferme
@@ -350,9 +353,9 @@ void compute_gravity_forces() {
         for (int j = i + 1; j < _nb_mobiles; j++) {
             float dx = _mobiles[j].p.x - _mobiles[i].p.x;
             float dy = _mobiles[j].p.y - _mobiles[i].p.y;
-            float dz = _mobiles[j].p.z - _mobiles[i].p.z;
+            //float dz = _mobiles[j].p.z - _mobiles[i].p.z;
             
-            float r2 = dx*dx + dy*dy + dz*dz;
+            float r2 = dx*dx + dy*dy;// + dz*dz;
             float r = sqrtf(r2);
             
             // Éviter division par zéro et forces trop grandes entre particules proches
@@ -365,16 +368,26 @@ void compute_gravity_forces() {
             //direction de la force (vecteur unitaire)
             float fx = force * dx / r;
             float fy = force * dy / r;
-            float fz = force * dz / r;
+            //float fz = force * dz / r;
             
             //la force aux deux particules (action-réaction)
             _mobiles[i].force.x += fx;
             _mobiles[i].force.y += fy;
-            _mobiles[i].force.z += fz;
+            //_mobiles[i].force.z += fz;
             
             _mobiles[j].force.x -= fx;
             _mobiles[j].force.y -= fy;
-            _mobiles[j].force.z -= fz;
+            //_mobiles[j].force.z -= fz;
+
+            // Réduire la vitesse des particules pour simuler un amortissement
+            _mobiles[i].v.x *= 0.9f; // Réduction de 80% par itération
+            _mobiles[i].v.y *= 0.9f;
+            //_mobiles[i].v.z *= 0.9f;
+            _mobiles[j].v.x *= 0.9f;
+            _mobiles[j].v.y *= 0.9f;
+            //_mobiles[j].v.z *= 0.9f;
+            _mobiles[i].force.x *= 0.1f;
+            _mobiles[i].force.y *= 0.1f;
         }
     }
 }
@@ -615,16 +628,25 @@ void compute_sph_forces() {
 		    _mobiles[i].pressure = GAS_CONSTANT * (powf(density_ratio, 4) - 1.0f);
 		} else {
 		    // Pression négative (attractive) si densité < REST_DENSITY, mais plus faible
-		    _mobiles[i].pressure = GAS_CONSTANT * 2.0f * (density_ratio - 1.0f);
+		    //ici on gere le mode espace
+            if(SPACE_MODE){
+                _mobiles[i].pressure = GAS_CONSTANT * 200.0f * (density_ratio - 1.0f);    
+                if (density_ratio < 1.0f) {
+                    // Attraction même à faible densité
+                    _mobiles[i].pressure += GAS_CONSTANT * 10.0f * (1.0f - density_ratio);
+                }
+            }else{
+                _mobiles[i].pressure = GAS_CONSTANT * 2.0f * (density_ratio - 1.0f);
+            }
 		}
 		//float density_ratio = _mobiles[i].density / REST_DENSITY;
         //_mobiles[i].pressure = GAS_CONSTANT * (powf(density_ratio, 7) - 1.0f);
         
         // Limiter les pressions extrêmes pour éviter l'instabilité
-        if (_mobiles[i].pressure > GAS_CONSTANT * 10.0f)
-            _mobiles[i].pressure = GAS_CONSTANT * 10.0f;
-        if (_mobiles[i].pressure < -GAS_CONSTANT)
-            _mobiles[i].pressure = -GAS_CONSTANT;
+        //if (_mobiles[i].pressure > GAS_CONSTANT * 10.0f)
+        //    _mobiles[i].pressure = GAS_CONSTANT * 10.0f;
+        //if (_mobiles[i].pressure < -GAS_CONSTANT)
+        //    _mobiles[i].pressure = -GAS_CONSTANT;
         
     }
     
@@ -724,8 +746,8 @@ void compute_sph_forces() {
             _mobiles[i].force.x *= scale;
             _mobiles[i].force.y *= scale;
         }
-        _mobiles[i].force.x *= 0.1f;
-        _mobiles[i].force.y *= 0.1f;
+        //_mobiles[i].force.x *= 0.1f;
+        //_mobiles[i].force.y *= 0.1f;
 		_mobiles[i].force.x += _g.x * _mobiles[i].density * 0.70f;
 		_mobiles[i].force.y += _g.y * _mobiles[i].density * 0.70f;
 		//_mobiles[i].force.x += _g.x;  // Indépendant de la densité
@@ -742,23 +764,30 @@ void init(void){
 	SDL_GL_SetSwapInterval(1);
 	/* set la couleur d'effacement OpenGL */
     if(!SPACE_MODE){
-
-        glClearColor(0.0f, 0.0f, 0.5f, 1.0f);
-        /* créer un programme GPU pour OpenGL (en GL4D) */
-        _pId = gl4duCreateProgram("<vs>shaders/identity.vs", "<fs>shaders/calculs.fs", NULL);
-    
-        mobile_init(1023);
-        //les rectangles
-        rect_init_list(3); //la liste de rectangles
-        rect_add(0.50f, -0.0f, 0.0f, 1.10f, 0.10f, 0.10f, -3.01f); // Rectangle 1
-        rect_add(0.4f, -0.1f, 0.0f, 0.10f, 1.10f, 0.10f, 0.0f); // Rectangle 2
-        rect_add(-0.1f, 0.5f, 0.0f, 1.0f, 0.10f, 0.10f, 3.0f); // Rectangle 3
+        TIME_SCALE = 10.0f;
+        vitesse = 10.0f;
+        _g.y = -9.81f;
     }else{
-        glClearColor(0.5f, 0.0f, 0.0f, 1.0f);
-        /* créer un programme GPU pour OpenGL (en GL4D) */
-        _pId = gl4duCreateProgram("<vs>shaders/identity.vs", "<fs>shaders/calculs.fs", NULL);
-        space_init(1023);
+        TIME_SCALE = 10.0f;
+        vitesse = 100.0f;
+        _g.y = 0.0f;
+        _g.x = 0.01f;
     }
+    glClearColor(0.0f, 0.0f, 0.5f, 1.0f);
+    /* créer un programme GPU pour OpenGL (en GL4D) */
+    _pId = gl4duCreateProgram("<vs>shaders/identity.vs", "<fs>shaders/calculs.fs", NULL);
+    mobile_init(1023);
+    //les rectangles
+    rect_init_list(3); //la liste de rectangles
+    rect_add(0.50f, -0.0f, 0.0f, 1.10f, 0.10f, 0.10f, -3.01f); // Rectangle 1
+    rect_add(0.4f, -0.1f, 0.0f, 0.10f, 1.10f, 0.10f, 0.0f); // Rectangle 2
+    rect_add(-0.1f, 0.5f, 0.0f, 1.0f, 0.10f, 0.10f, 3.0f); // Rectangle 3
+    //}else{
+    //    glClearColor(0.5f, 0.0f, 0.0f, 1.0f);
+    //    /* créer un programme GPU pour OpenGL (en GL4D) */
+    //    _pId = gl4duCreateProgram("<vs>shaders/identity.vs", "<fs>shaders/calculs.fs", NULL);
+    //    space_init(1023);
+    //}
 }
 
 
@@ -769,12 +798,10 @@ void draw(void){
 	glUseProgram(_pId);
 	/* binder (mettre au premier plan, "en courante" ou "en active") la
 	   matrice view */
-    //if (!SPACE_MODE){
-	    mobile_draw();
-        rect_draw_all();
-        /* n'utiliser aucun programme GPU (pas nécessaire) */
-        glUseProgram(0);
-    //}
+	mobile_draw();
+    rect_draw_all();
+    /* n'utiliser aucun programme GPU (pas nécessaire) */
+    glUseProgram(0);
 }
 
 /* appelée lors du exit */
@@ -885,125 +912,120 @@ void mobile_simu(void){
 	t0 = t;
 
 	if (dt > 0.03f) dt = 0.03f; // Limiter le pas de temps à 30 ms
-	    if (!SPACE_MODE) {
-        // Calculer les forces SPH
-        compute_sph_forces();
-        for (int i = 0; i < _nb_mobiles; ++i) {
-            _mobiles[i].force.x *= dt*TIME_SCALE;
-            _mobiles[i].force.y *= dt*TIME_SCALE;
-            _mobiles[i].force.z *= dt*TIME_SCALE;
-        }
-	    for (int i = 0; i < _nb_mobiles; ++i) {
-            // Intégration explicite d'Euler
-            float accel_x = _mobiles[i].force.x / _mobiles[i].density;
-            float accel_y = _mobiles[i].force.y / _mobiles[i].density;
-
-            _mobiles[i].v.x += accel_x * dt;
-            _mobiles[i].v.y += accel_y * dt;
-
-            // Mettre à jour position
-            _mobiles[i].p.x += _mobiles[i].v.x * dt;
-            _mobiles[i].p.y += _mobiles[i].v.y * dt;
-
-            // Collision avec les murs avec rebond
-            if (_mobiles[i].p.x - _mobiles[i].r <= -1.0f) {
-                _mobiles[i].v.x = -_mobiles[i].v.x * e;
-                _mobiles[i].p.x = -1.0f + _mobiles[i].r;
-            }
-            if (_mobiles[i].p.x + _mobiles[i].r >= 1.0f) {
-                _mobiles[i].v.x = -_mobiles[i].v.x * e;
-                _mobiles[i].p.x = 1.0f - _mobiles[i].r;
-            }
-            if (_mobiles[i].p.y - _mobiles[i].r <= -1.0f) {
-                _mobiles[i].v.y = -_mobiles[i].v.y * e;
-                _mobiles[i].p.y = -1.0f + _mobiles[i].r;
-            }
-            if (_mobiles[i].p.y + _mobiles[i].r >= 1.0f) {
-                _mobiles[i].v.y = -_mobiles[i].v.y * e;
-                _mobiles[i].p.y = 1.0f - _mobiles[i].r;
-            }
-
-            // Amortissement global (facultatif)
-            //_mobiles[i].v.x *= 0.95;//95f;
-            //_mobiles[i].v.y *= 0.95;//95f;
-
-            // Mettre à jour la couleur en fonction de la pression (visualisation)
-            float pressure_ratio = _mobiles[i].pressure / (GAS_CONSTANT * REST_DENSITY);
-            pressure_ratio = fmaxf(0.0f, fminf(1.0f, pressure_ratio * 0.1f));
-
-            _mobiles[i].color[0] = pressure_ratio;
-            _mobiles[i].color[1] = 0.2f + 0.8f * (1.0f - pressure_ratio);
-            _mobiles[i].color[2] = 1.0f - pressure_ratio;
-	    	// Si la densité est trop élevée, réduire la vitesse
-	    	//if (_mobiles[i].density > REST_DENSITY * 1.5f) {
-	    	//	_mobiles[i].v.x *= 0.85f;  // Réduire davantage la vitesse dans les zones denses
-	    	//	_mobiles[i].v.y *= 0.85f;
-	    	//}
-	    	/*
-	    	// Calculer la vitesse actuelle
-	    	float speed = sqrtf(_mobiles[i].v.x * _mobiles[i].v.x + _mobiles[i].v.y * _mobiles[i].v.y);
-        
-	    	// Si la vitesse dépasse le maximum, la réduire
-	    	if (speed > max_speed) {
-	    		float scale = max_speed / speed;
-	    		_mobiles[i].v.x *= scale;
-	    		_mobiles[i].v.y *= scale;
-	    	}
-	    	*/
-        }
-	    for (int i = 0; i < _nb_mobiles; ++i) {
-	    	for (int j = i + 1; j < _nb_mobiles; ++j) {
-	    		float dx = _mobiles[j].p.x - _mobiles[i].p.x;
-	    		float dy = _mobiles[j].p.y - _mobiles[i].p.y;
-	    		float dist2 = dx * dx + dy * dy;
-            
-	    		// Somme des rayons
-	    		float sumRadii = _mobiles[i].r + _mobiles[j].r;
-            
-	    		// Test de collision
-	    		if (dist2 < sumRadii * sumRadii) {
-	    			float dist = sqrtf(dist2);
-	    			if (dist < 0.0001f) dist = 0.0001f; // éviter la division par zéro
-                
-	    			// Vecteur unitaire i -> j
-	    			float nx = dx / dist;
-	    			float ny = dy / dist;
-                
-	    			// Écarter les particules pour corriger le chevauchement
-	    			float overlap = 0.5f * (sumRadii - dist);
-	    			_mobiles[i].p.x -= nx * overlap;
-	    			_mobiles[i].p.y -= ny * overlap;
-	    			_mobiles[j].p.x += nx * overlap;
-	    			_mobiles[j].p.y += ny * overlap;
-                
-	    			// Vitesse relative dans la direction de la collision
-	    			float vx = _mobiles[j].v.x - _mobiles[i].v.x;
-	    			float vy = _mobiles[j].v.y - _mobiles[i].v.y;
-	    			float dot = vx * nx + vy * ny;
-                
-	    			// Si dot > 0, elles s'éloignent déjà ⇒ pas de correction supplémentaire
-	    			if (dot > 0.0f) continue;
-                
-	    			// Coefficient de restitution (rebond)
-	    			float restitution = 0.5f; // Ajustez selon l'effet rebond désiré
-                
-	    			// Impulsion
-	    			float impulse = -(1.0f + restitution) * dot;
-	    			// Masse = 1 pour les deux particules (dans votre code, MASS=1.0f)
-	    			impulse *= 0.5f; // Répartition égale si les masses sont égales
-                
-	    			// Appliquer l’impulsion
-	    			_mobiles[i].v.x -= nx * impulse;
-	    			_mobiles[i].v.y -= ny * impulse;
-	    			_mobiles[j].v.x += nx * impulse;
-	    			_mobiles[j].v.y += ny * impulse;
-	    		}
-	    	}
-	    }
-    }else{
-        mobile_simu_with_mode_selection();
-        // Gérer les collisions entre particules TODO
+    // Calculer les forces SPH
+    compute_sph_forces();
+    for (int i = 0; i < _nb_mobiles; ++i) {
+        _mobiles[i].force.x *= dt*TIME_SCALE;
+        _mobiles[i].force.y *= dt*TIME_SCALE;
+        _mobiles[i].force.z *= dt*TIME_SCALE;
     }
+	for (int i = 0; i < _nb_mobiles; ++i) {
+        // Intégration explicite d'Euler
+        float accel_x = _mobiles[i].force.x / _mobiles[i].density;
+        float accel_y = _mobiles[i].force.y / _mobiles[i].density;
+        
+        _mobiles[i].v.x += accel_x * dt * vitesse;
+        _mobiles[i].v.y += accel_y * dt * vitesse;//TODO aller plus vite dans l'espace
+        
+        // Mettre à jour position
+        _mobiles[i].p.x += _mobiles[i].v.x * dt;
+        _mobiles[i].p.y += _mobiles[i].v.y * dt;
+        
+        // Collision avec les murs avec rebond
+        if (_mobiles[i].p.x - _mobiles[i].r <= -1.0f) {
+            _mobiles[i].v.x = -_mobiles[i].v.x * e;
+            _mobiles[i].p.x = -1.0f + _mobiles[i].r;
+        }
+        if (_mobiles[i].p.x + _mobiles[i].r >= 1.0f) {
+            _mobiles[i].v.x = -_mobiles[i].v.x * e;
+            _mobiles[i].p.x = 1.0f - _mobiles[i].r;
+        }
+        if (_mobiles[i].p.y - _mobiles[i].r <= -1.0f) {
+            _mobiles[i].v.y = -_mobiles[i].v.y * e;
+            _mobiles[i].p.y = -1.0f + _mobiles[i].r;
+        }
+        if (_mobiles[i].p.y + _mobiles[i].r >= 1.0f) {
+            _mobiles[i].v.y = -_mobiles[i].v.y * e;
+            _mobiles[i].p.y = 1.0f - _mobiles[i].r;
+        }
+        
+        // Amortissement global (facultatif)
+        //_mobiles[i].v.x *= 0.95;//95f;
+        //_mobiles[i].v.y *= 0.95;//95f;
+        
+        // Mettre à jour la couleur en fonction de la pression (visualisation)
+        float pressure_ratio = (_mobiles[i].pressure / (GAS_CONSTANT * REST_DENSITY))*0.01f;
+        pressure_ratio = fmaxf(0.0f, fminf(1.0f, pressure_ratio * 0.1f));
+        
+        _mobiles[i].color[0] = pressure_ratio;
+        _mobiles[i].color[1] = 0.2f + 0.8f * (1.0f - pressure_ratio);
+        _mobiles[i].color[2] = 1.0f - pressure_ratio;//TODO changer la couleur
+		// Si la densité est trop élevée, réduire la vitesse
+		//if (_mobiles[i].density > REST_DENSITY * 1.5f) {
+		//	_mobiles[i].v.x *= 0.85f;  // Réduire davantage la vitesse dans les zones denses
+		//	_mobiles[i].v.y *= 0.85f;
+		//}
+		/*
+		// Calculer la vitesse actuelle
+		float speed = sqrtf(_mobiles[i].v.x * _mobiles[i].v.x + _mobiles[i].v.y * _mobiles[i].v.y);
+    
+		// Si la vitesse dépasse le maximum, la réduire
+		if (speed > max_speed) {
+			float scale = max_speed / speed;
+			_mobiles[i].v.x *= scale;
+			_mobiles[i].v.y *= scale;
+		}
+		*/
+    }
+	for (int i = 0; i < _nb_mobiles; ++i) {
+		for (int j = i + 1; j < _nb_mobiles; ++j) {
+			float dx = _mobiles[j].p.x - _mobiles[i].p.x;
+			float dy = _mobiles[j].p.y - _mobiles[i].p.y;
+			float dist2 = dx * dx + dy * dy;
+			
+			// Somme des rayons
+			float sumRadii = _mobiles[i].r + _mobiles[j].r;
+			
+			// Test de collision
+			if (dist2 < sumRadii * sumRadii) {
+				float dist = sqrtf(dist2);
+				if (dist < 0.0001f) dist = 0.0001f; // éviter la division par zéro
+				
+				// Vecteur unitaire i -> j
+				float nx = dx / dist;
+				float ny = dy / dist;
+				
+				// Écarter les particules pour corriger le chevauchement
+				float overlap = 0.5f * (sumRadii - dist);
+				_mobiles[i].p.x -= nx * overlap;
+				_mobiles[i].p.y -= ny * overlap;
+				_mobiles[j].p.x += nx * overlap;
+				_mobiles[j].p.y += ny * overlap;
+				
+				// Vitesse relative dans la direction de la collision
+				float vx = _mobiles[j].v.x - _mobiles[i].v.x;
+				float vy = _mobiles[j].v.y - _mobiles[i].v.y;
+				float dot = vx * nx + vy * ny;
+				
+				// Si dot > 0, elles s'éloignent déjà ⇒ pas de correction supplémentaire
+				if (dot > 0.0f) continue;
+				
+				// Coefficient de restitution (rebond)
+				float restitution = 0.5f; // Ajustez selon l'effet rebond désiré
+				
+				// Impulsion
+				float impulse = -(1.0f + restitution) * dot;
+				// Masse = 1 pour les deux particules (dans votre code, MASS=1.0f)
+				impulse *= 0.5f; // Répartition égale si les masses sont égales
+				
+				// Appliquer l’impulsion
+				_mobiles[i].v.x -= nx * impulse;
+				_mobiles[i].v.y -= ny * impulse;
+				_mobiles[j].v.x += nx * impulse;
+				_mobiles[j].v.y += ny * impulse;
+			}
+		}
+	}
     rect_collide_all(_mobiles, _nb_mobiles, e);
 }
 
@@ -1014,17 +1036,18 @@ void toggle_simulation_mode() {
     mobile_quit();
     
     if (SPACE_MODE) {
+        TIME_SCALE = 1000.0f;
         // Désactiver la gravité globale
         _g.x = _g.y = _g.z = 0.0f;
         // Initialiser en mode espace
         space_init(1023);
     } else {
-        // Réinitialiser en mode eau
-        mobile_init(1023);
         // Rétablir la gravité vers le bas
         _g.x = 0.0f; 
         _g.y = -9.81f;
         _g.z = 0.0f;
+        // Réinitialiser en mode eau
+        mobile_init(1023);
     }
 }
 // Fonction principale de simulation modifiée pour sélectionner le mode
@@ -1039,18 +1062,49 @@ void mobile_simu_with_mode_selection() {
 void mobile_draw(void){
 	GLfloat *tmp = malloc(4 * _nb_mobiles * sizeof *tmp);
 	assert(tmp);
-	for (int i = 0; i < _nb_mobiles; ++i)
-	{
+	for (int i = 0; i < _nb_mobiles; ++i){
 		tmp[4 * i + 0] = _mobiles[i].p.x;
 		tmp[4 * i + 1] = _mobiles[i].p.y;
 		tmp[4 * i + 2] = _mobiles[i].r;
 	}
 	glUniform4fv(glGetUniformLocation(_pId, "positions"), _nb_mobiles, tmp);
+    /*
+    if (SPACE_MODE) {
+        //maj des couleurs en fonction de la vélocité ou autres propriétés
+        for (int i = 0; i < _nb_mobiles; ++i) {
+            //particule centrale (étoile) est plus brillante
+            if (i == 0) {
+                tmp[4 * i + 0] = 1.0f;       // Rouge plus vif
+                tmp[4 * i + 1] = 0.9f;       // Jaune-orange
+                tmp[4 * i + 2] = 0.3f;       // Un peu de bleu pour moins jaune
+                tmp[4 * i + 3] = 1.0f;       // Opacité complète
+            } else {
+                // Copier les couleurs déjà calculées dans space_simulation
+                for (int j = 0; j < 4; ++j) {
+                    tmp[4 * i + j] = _mobiles[i].color[j];
+                }
+                
+                // Ajouter un effet de brillance basé sur la vélocité
+                float speed = sqrtf(_mobiles[i].v.x * _mobiles[i].v.x + 
+                                   _mobiles[i].v.y * _mobiles[i].v.y +
+                                   _mobiles[i].v.z * _mobiles[i].v.z);
+                tmp[4 * i + 3] = 0.7f + 0.3f * speed; // Variation de l'opacité
+            }
+        }
+    } else {// Mode eau normal : les couleurs de base
+        for (int i = 0; i < _nb_mobiles; ++i) {
+            for (int j = 0; j < 4; ++j) {
+                tmp[4 * i + j] = _mobiles[i].color[j];
+            }
+        }
+    }
+    */
 	for (int i = 0; i < _nb_mobiles; ++i)
 		for (int j = 0; j < 4; ++j)
 			tmp[4 * i + j] = _mobiles[i].color[j];
 	glUniform4fv(glGetUniformLocation(_pId, "couleurs"), _nb_mobiles, tmp);
 	glUniform1i(glGetUniformLocation(_pId, "nbe"), _nb_mobiles);
+    glUniform1i(glGetUniformLocation(_pId, "space_mode"), SPACE_MODE);
 	//TODO met le scatering et blur
 	gl4dgDraw(_quad);
 	free(tmp);
