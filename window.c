@@ -17,6 +17,11 @@
 #define HASH_SIZE 1024
 #define CELL_SIZE 0.1f  //taille des cellules pour la grille spatiale
 
+//pour la gravitée radiale
+#define G_CONSTANT 6.67430e-3  // Constante gravitationnelle modifiée pour l'échelle de la simulation
+#define MIN_DISTANCE 0.01f     // Distance minimale pour éviter les accélérations infinies
+static int SPACE_MODE = 1;    // 0 = mode eau normal, 1 = mode espace gravitationnel
+
 #ifndef M_PI
 	#define M_PI 3.14159265358979323846
 #endif
@@ -331,6 +336,235 @@ void build_spatial_grid() {
     }
 }
 
+// Fonction pour calculer les forces gravitationnelles entre particules
+void compute_gravity_forces() {
+    //reset les forces
+    for (int i = 0; i < _nb_mobiles; i++) {
+        _mobiles[i].force.x = 0.0f;
+        _mobiles[i].force.y = 0.0f;
+        _mobiles[i].force.z = 0.0f;
+    }
+    
+    //calcule des forces gravitationnelles entre chaque paire de particules
+    for (int i = 0; i < _nb_mobiles; i++) {
+        for (int j = i + 1; j < _nb_mobiles; j++) {
+            float dx = _mobiles[j].p.x - _mobiles[i].p.x;
+            float dy = _mobiles[j].p.y - _mobiles[i].p.y;
+            float dz = _mobiles[j].p.z - _mobiles[i].p.z;
+            
+            float r2 = dx*dx + dy*dy + dz*dz;
+            float r = sqrtf(r2);
+            
+            // Éviter division par zéro et forces trop grandes entre particules proches
+            if (r < MIN_DISTANCE) r = MIN_DISTANCE;
+            
+            //force gravitationnelle: F = G * m1 * m2 / r^2
+            //toutes les particules ont la même masse (MASS)
+            float force = G_CONSTANT * MASS * MASS / r2;
+            
+            //direction de la force (vecteur unitaire)
+            float fx = force * dx / r;
+            float fy = force * dy / r;
+            float fz = force * dz / r;
+            
+            //la force aux deux particules (action-réaction)
+            _mobiles[i].force.x += fx;
+            _mobiles[i].force.y += fy;
+            _mobiles[i].force.z += fz;
+            
+            _mobiles[j].force.x -= fx;
+            _mobiles[j].force.y -= fy;
+            _mobiles[j].force.z -= fz;
+        }
+    }
+}
+
+
+// Gérer les collisions physiques entre particules
+void handle_particle_collisions(float dt) {
+    for (int i = 0; i < _nb_mobiles; ++i) {
+        for (int j = i + 1; j < _nb_mobiles; ++j) {
+            float dx = _mobiles[j].p.x - _mobiles[i].p.x;
+            float dy = _mobiles[j].p.y - _mobiles[i].p.y;
+            float dz = _mobiles[j].p.z - _mobiles[i].p.z;
+            
+            float dist2 = dx*dx + dy*dy + dz*dz;
+            float min_dist = _mobiles[i].r + _mobiles[j].r;
+            
+            if (dist2 < min_dist * min_dist) {
+                float dist = sqrtf(dist2);
+                if (dist < 0.0001f) dist = 0.0001f; // Éviter division par zéro
+                
+                // Vecteurs unitaires
+                float nx = dx / dist;
+                float ny = dy / dist;
+                float nz = dz / dist;
+                
+                // Correction de position pour éviter le chevauchement
+                float overlap = 0.5f * (min_dist - dist);
+                _mobiles[i].p.x -= nx * overlap;
+                _mobiles[i].p.y -= ny * overlap;
+                _mobiles[i].p.z -= nz * overlap;
+                _mobiles[j].p.x += nx * overlap;
+                _mobiles[j].p.y += ny * overlap;
+                _mobiles[j].p.z += nz * overlap;
+                
+                // Calcul de l'impulsion pour le rebond
+                float vx = _mobiles[j].v.x - _mobiles[i].v.x;
+                float vy = _mobiles[j].v.y - _mobiles[i].v.y;
+                float vz = _mobiles[j].v.z - _mobiles[i].v.z;
+                
+                float dot = vx*nx + vy*ny + vz*nz;
+                if (dot > 0.0f) continue; // Les particules s'éloignent déjà
+                
+                float impulse = -(1.0f + e) * dot;
+                impulse /= 2.0f; // Masses égales
+                
+                _mobiles[i].v.x -= impulse * nx;
+                _mobiles[i].v.y -= impulse * ny;
+                _mobiles[i].v.z -= impulse * nz;
+                
+                _mobiles[j].v.x += impulse * nx;
+                _mobiles[j].v.y += impulse * ny;
+                _mobiles[j].v.z += impulse * nz;
+            }
+        }
+    }
+}
+
+
+// Ajouter une nouvelle fonction de simulation pour le mode spatial
+void space_simulation() {
+    static double t0 = 0;
+    double t = gl4dGetElapsedTime() / 1000.0, dt = (t - t0) * 30.0;
+    t0 = t;
+    
+    if (dt > 0.03f) dt = 0.03f; // Limiter le pas de temps
+    
+    // Calculer les forces gravitationnelles entre particules
+    compute_gravity_forces();
+    
+    // Mise à jour des positions et vitesses
+    for (int i = 0; i < _nb_mobiles; ++i) {
+        // Intégration d'Euler
+        _mobiles[i].v.x += _mobiles[i].force.x * dt / MASS;
+        _mobiles[i].v.y += _mobiles[i].force.y * dt / MASS;
+        _mobiles[i].v.z += _mobiles[i].force.z * dt / MASS;
+        
+        _mobiles[i].p.x += _mobiles[i].v.x * dt;
+        _mobiles[i].p.y += _mobiles[i].v.y * dt;
+        _mobiles[i].p.z += _mobiles[i].v.z * dt;
+        
+        // Limiter la vitesse maximale pour la stabilité
+        float speed = sqrtf(_mobiles[i].v.x * _mobiles[i].v.x + 
+                            _mobiles[i].v.y * _mobiles[i].v.y +
+                            _mobiles[i].v.z * _mobiles[i].v.z);
+        const float max_speed = 1.0f;
+        if (speed > max_speed) {
+            float ratio = max_speed / speed;
+            _mobiles[i].v.x *= ratio;
+            _mobiles[i].v.y *= ratio;
+            _mobiles[i].v.z *= ratio;
+        }
+        
+        // Rebond sur les bords (ou espace toroïdal)
+        if (_mobiles[i].p.x < -1.0f) {
+            _mobiles[i].p.x = -1.0f;
+            _mobiles[i].v.x = -_mobiles[i].v.x * e;
+        }
+        if (_mobiles[i].p.x > 1.0f) {
+            _mobiles[i].p.x = 1.0f;
+            _mobiles[i].v.x = -_mobiles[i].v.x * e;
+        }
+        if (_mobiles[i].p.y < -1.0f) {
+            _mobiles[i].p.y = -1.0f;
+            _mobiles[i].v.y = -_mobiles[i].v.y * e;
+        }
+        if (_mobiles[i].p.y > 1.0f) {
+            _mobiles[i].p.y = 1.0f;
+            _mobiles[i].v.y = -_mobiles[i].v.y * e;
+        }
+        
+        // Gestion du Z pour une éventuelle visualisation 3D future
+        if (_mobiles[i].p.z < -1.0f) {
+            _mobiles[i].p.z = -1.0f;
+            _mobiles[i].v.z = -_mobiles[i].v.z * e;
+        }
+        if (_mobiles[i].p.z > 1.0f) {
+            _mobiles[i].p.z = 1.0f;
+            _mobiles[i].v.z = -_mobiles[i].v.z * e;
+        }
+        
+        // Coloration basée sur la vitesse pour visualiser l'énergie
+        float energy = speed / max_speed;
+        _mobiles[i].color[0] = energy;
+        _mobiles[i].color[1] = 0.4f;
+        _mobiles[i].color[2] = 1.0f - energy * 0.5f;
+    }
+    
+    // Gérer les collisions entre particules
+    handle_particle_collisions(dt);
+    
+    // Gérer les collisions avec les obstacles
+    rect_collide_all(_mobiles, _nb_mobiles, e);
+}
+
+// Initialisation pour mode spatial
+void space_init(int n) {
+    assert(_mobiles == NULL);
+    _nb_mobiles = n;
+    _mobiles = malloc(_nb_mobiles * sizeof *_mobiles);
+    assert(_mobiles);
+    
+    //configuration initiale en forme de disque/anneau
+    float center_x = 0.0f;
+    float center_y = 0.0f;
+    float inner_radius = 0.1f;
+    float outer_radius = 0.7f;
+    float orbital_velocity = 0.4f;  // Vitesse orbitale de base
+
+    for (int i = 0; i < n; i++) {
+        // Position aléatoire dans un anneau
+        float angle = gl4dmSURand() * 2.0f * M_PI;
+        float radius = inner_radius + gl4dmSURand() * (outer_radius - inner_radius);
+        
+        _mobiles[i].p.x = center_x + radius * cosf(angle);
+        _mobiles[i].p.y = center_y + radius * sinf(angle);
+        _mobiles[i].p.z = (gl4dmSURand() - 0.5f) * 0.2f;  // Petite variation en Z
+        
+        // Vitesse orbitale (perpendiculaire au rayon)
+        float orbital_speed = orbital_velocity / sqrtf(radius);  // Loi de Kepler simplifiée
+        _mobiles[i].v.x = -sinf(angle) * orbital_speed * (0.8f + 0.4f * gl4dmSURand());
+        _mobiles[i].v.y = cosf(angle) * orbital_speed * (0.8f + 0.4f * gl4dmSURand());
+        _mobiles[i].v.z = 0.0f;
+        
+        // Taille et autres propriétés
+        _mobiles[i].r = 0.01f + 0.01f * gl4dmSURand();  // Tailles variables
+        _mobiles[i].density = REST_DENSITY;
+        _mobiles[i].pressure = 0.0f;
+        _mobiles[i].force.x = _mobiles[i].force.y = _mobiles[i].force.z = 0.0f;
+        
+        // Couleurs basées sur la distance au centre (comme les anneaux planétaires)
+        float color_factor = (radius - inner_radius) / (outer_radius - inner_radius);
+        _mobiles[i].color[0] = 0.8f - 0.4f * color_factor;
+        _mobiles[i].color[1] = 0.4f + 0.4f * color_factor;
+        _mobiles[i].color[2] = 0.6f + 0.4f * color_factor;
+        _mobiles[i].color[3] = 1.0f;
+    }
+    
+    // Ajouter un corps central plus massif (ajustez l'indice si nécessaire)
+    if (n > 0) {
+        _mobiles[0].p.x = center_x;
+        _mobiles[0].p.y = center_y;
+        _mobiles[0].p.z = 0.0f;
+        _mobiles[0].v.x = _mobiles[0].v.y = _mobiles[0].v.z = 0.0f;
+        _mobiles[0].r = 0.05f;  // Corps central plus grand
+        _mobiles[0].color[0] = 1.0f;
+        _mobiles[0].color[1] = 0.9f;
+        _mobiles[0].color[2] = 0.4f;
+    }
+}
+
 // Fonction principale SPH
 void compute_sph_forces() {
     // Construire la grille spatiale
@@ -507,16 +741,24 @@ void init(void){
 	/* activer la synchronisation verticale */
 	SDL_GL_SetSwapInterval(1);
 	/* set la couleur d'effacement OpenGL */
-	glClearColor(0.0f, 0.0f, 0.5f, 1.0f);
-	/* créer un programme GPU pour OpenGL (en GL4D) */
-	_pId = gl4duCreateProgram("<vs>shaders/identity.vs", "<fs>shaders/calculs.fs", NULL);
+    if(!SPACE_MODE){
 
-	mobile_init(1023);
-    //les rectangles
-    rect_init_list(3); //la liste de rectangles
-    rect_add(0.50f, -0.0f, 0.0f, 1.10f, 0.10f, 0.10f, -3.01f); // Rectangle 1
-    rect_add(0.4f, -0.1f, 0.0f, 0.10f, 1.10f, 0.10f, 0.0f); // Rectangle 2
-    rect_add(-0.1f, 0.5f, 0.0f, 1.0f, 0.10f, 0.10f, 3.0f); // Rectangle 3
+        glClearColor(0.0f, 0.0f, 0.5f, 1.0f);
+        /* créer un programme GPU pour OpenGL (en GL4D) */
+        _pId = gl4duCreateProgram("<vs>shaders/identity.vs", "<fs>shaders/calculs.fs", NULL);
+    
+        mobile_init(1023);
+        //les rectangles
+        rect_init_list(3); //la liste de rectangles
+        rect_add(0.50f, -0.0f, 0.0f, 1.10f, 0.10f, 0.10f, -3.01f); // Rectangle 1
+        rect_add(0.4f, -0.1f, 0.0f, 0.10f, 1.10f, 0.10f, 0.0f); // Rectangle 2
+        rect_add(-0.1f, 0.5f, 0.0f, 1.0f, 0.10f, 0.10f, 3.0f); // Rectangle 3
+    }else{
+        glClearColor(0.5f, 0.0f, 0.0f, 1.0f);
+        /* créer un programme GPU pour OpenGL (en GL4D) */
+        _pId = gl4duCreateProgram("<vs>shaders/identity.vs", "<fs>shaders/calculs.fs", NULL);
+        space_init(1023);
+    }
 }
 
 
@@ -527,12 +769,12 @@ void draw(void){
 	glUseProgram(_pId);
 	/* binder (mettre au premier plan, "en courante" ou "en active") la
 	   matrice view */
-
-	mobile_draw();
-    rect_draw_all();
-
-	/* n'utiliser aucun programme GPU (pas nécessaire) */
-	glUseProgram(0);
+    //if (!SPACE_MODE){
+	    mobile_draw();
+        rect_draw_all();
+        /* n'utiliser aucun programme GPU (pas nécessaire) */
+        glUseProgram(0);
+    //}
 }
 
 /* appelée lors du exit */
@@ -643,294 +885,157 @@ void mobile_simu(void){
 	t0 = t;
 
 	if (dt > 0.03f) dt = 0.03f; // Limiter le pas de temps à 30 ms
-	// Calculer les forces SPH
-    compute_sph_forces();
-    for (int i = 0; i < _nb_mobiles; ++i) {
-        _mobiles[i].force.x *= dt*TIME_SCALE;
-        _mobiles[i].force.y *= dt*TIME_SCALE;
-        _mobiles[i].force.z *= dt*TIME_SCALE;
+	    if (!SPACE_MODE) {
+        // Calculer les forces SPH
+        compute_sph_forces();
+        for (int i = 0; i < _nb_mobiles; ++i) {
+            _mobiles[i].force.x *= dt*TIME_SCALE;
+            _mobiles[i].force.y *= dt*TIME_SCALE;
+            _mobiles[i].force.z *= dt*TIME_SCALE;
+        }
+	    for (int i = 0; i < _nb_mobiles; ++i) {
+            // Intégration explicite d'Euler
+            float accel_x = _mobiles[i].force.x / _mobiles[i].density;
+            float accel_y = _mobiles[i].force.y / _mobiles[i].density;
+
+            _mobiles[i].v.x += accel_x * dt;
+            _mobiles[i].v.y += accel_y * dt;
+
+            // Mettre à jour position
+            _mobiles[i].p.x += _mobiles[i].v.x * dt;
+            _mobiles[i].p.y += _mobiles[i].v.y * dt;
+
+            // Collision avec les murs avec rebond
+            if (_mobiles[i].p.x - _mobiles[i].r <= -1.0f) {
+                _mobiles[i].v.x = -_mobiles[i].v.x * e;
+                _mobiles[i].p.x = -1.0f + _mobiles[i].r;
+            }
+            if (_mobiles[i].p.x + _mobiles[i].r >= 1.0f) {
+                _mobiles[i].v.x = -_mobiles[i].v.x * e;
+                _mobiles[i].p.x = 1.0f - _mobiles[i].r;
+            }
+            if (_mobiles[i].p.y - _mobiles[i].r <= -1.0f) {
+                _mobiles[i].v.y = -_mobiles[i].v.y * e;
+                _mobiles[i].p.y = -1.0f + _mobiles[i].r;
+            }
+            if (_mobiles[i].p.y + _mobiles[i].r >= 1.0f) {
+                _mobiles[i].v.y = -_mobiles[i].v.y * e;
+                _mobiles[i].p.y = 1.0f - _mobiles[i].r;
+            }
+
+            // Amortissement global (facultatif)
+            //_mobiles[i].v.x *= 0.95;//95f;
+            //_mobiles[i].v.y *= 0.95;//95f;
+
+            // Mettre à jour la couleur en fonction de la pression (visualisation)
+            float pressure_ratio = _mobiles[i].pressure / (GAS_CONSTANT * REST_DENSITY);
+            pressure_ratio = fmaxf(0.0f, fminf(1.0f, pressure_ratio * 0.1f));
+
+            _mobiles[i].color[0] = pressure_ratio;
+            _mobiles[i].color[1] = 0.2f + 0.8f * (1.0f - pressure_ratio);
+            _mobiles[i].color[2] = 1.0f - pressure_ratio;
+	    	// Si la densité est trop élevée, réduire la vitesse
+	    	//if (_mobiles[i].density > REST_DENSITY * 1.5f) {
+	    	//	_mobiles[i].v.x *= 0.85f;  // Réduire davantage la vitesse dans les zones denses
+	    	//	_mobiles[i].v.y *= 0.85f;
+	    	//}
+	    	/*
+	    	// Calculer la vitesse actuelle
+	    	float speed = sqrtf(_mobiles[i].v.x * _mobiles[i].v.x + _mobiles[i].v.y * _mobiles[i].v.y);
+        
+	    	// Si la vitesse dépasse le maximum, la réduire
+	    	if (speed > max_speed) {
+	    		float scale = max_speed / speed;
+	    		_mobiles[i].v.x *= scale;
+	    		_mobiles[i].v.y *= scale;
+	    	}
+	    	*/
+        }
+	    for (int i = 0; i < _nb_mobiles; ++i) {
+	    	for (int j = i + 1; j < _nb_mobiles; ++j) {
+	    		float dx = _mobiles[j].p.x - _mobiles[i].p.x;
+	    		float dy = _mobiles[j].p.y - _mobiles[i].p.y;
+	    		float dist2 = dx * dx + dy * dy;
+            
+	    		// Somme des rayons
+	    		float sumRadii = _mobiles[i].r + _mobiles[j].r;
+            
+	    		// Test de collision
+	    		if (dist2 < sumRadii * sumRadii) {
+	    			float dist = sqrtf(dist2);
+	    			if (dist < 0.0001f) dist = 0.0001f; // éviter la division par zéro
+                
+	    			// Vecteur unitaire i -> j
+	    			float nx = dx / dist;
+	    			float ny = dy / dist;
+                
+	    			// Écarter les particules pour corriger le chevauchement
+	    			float overlap = 0.5f * (sumRadii - dist);
+	    			_mobiles[i].p.x -= nx * overlap;
+	    			_mobiles[i].p.y -= ny * overlap;
+	    			_mobiles[j].p.x += nx * overlap;
+	    			_mobiles[j].p.y += ny * overlap;
+                
+	    			// Vitesse relative dans la direction de la collision
+	    			float vx = _mobiles[j].v.x - _mobiles[i].v.x;
+	    			float vy = _mobiles[j].v.y - _mobiles[i].v.y;
+	    			float dot = vx * nx + vy * ny;
+                
+	    			// Si dot > 0, elles s'éloignent déjà ⇒ pas de correction supplémentaire
+	    			if (dot > 0.0f) continue;
+                
+	    			// Coefficient de restitution (rebond)
+	    			float restitution = 0.5f; // Ajustez selon l'effet rebond désiré
+                
+	    			// Impulsion
+	    			float impulse = -(1.0f + restitution) * dot;
+	    			// Masse = 1 pour les deux particules (dans votre code, MASS=1.0f)
+	    			impulse *= 0.5f; // Répartition égale si les masses sont égales
+                
+	    			// Appliquer l’impulsion
+	    			_mobiles[i].v.x -= nx * impulse;
+	    			_mobiles[i].v.y -= ny * impulse;
+	    			_mobiles[j].v.x += nx * impulse;
+	    			_mobiles[j].v.y += ny * impulse;
+	    		}
+	    	}
+	    }
+    }else{
+        mobile_simu_with_mode_selection();
+        // Gérer les collisions entre particules TODO
     }
-	for (int i = 0; i < _nb_mobiles; ++i) {
-        // Intégration explicite d'Euler
-        float accel_x = _mobiles[i].force.x / _mobiles[i].density;
-        float accel_y = _mobiles[i].force.y / _mobiles[i].density;
-        
-        _mobiles[i].v.x += accel_x * dt;
-        _mobiles[i].v.y += accel_y * dt;
-        
-        // Mettre à jour position
-        _mobiles[i].p.x += _mobiles[i].v.x * dt;
-        _mobiles[i].p.y += _mobiles[i].v.y * dt;
-        
-        // Collision avec les murs avec rebond
-        if (_mobiles[i].p.x - _mobiles[i].r <= -1.0f) {
-            _mobiles[i].v.x = -_mobiles[i].v.x * e;
-            _mobiles[i].p.x = -1.0f + _mobiles[i].r;
-        }
-        if (_mobiles[i].p.x + _mobiles[i].r >= 1.0f) {
-            _mobiles[i].v.x = -_mobiles[i].v.x * e;
-            _mobiles[i].p.x = 1.0f - _mobiles[i].r;
-        }
-        if (_mobiles[i].p.y - _mobiles[i].r <= -1.0f) {
-            _mobiles[i].v.y = -_mobiles[i].v.y * e;
-            _mobiles[i].p.y = -1.0f + _mobiles[i].r;
-        }
-        if (_mobiles[i].p.y + _mobiles[i].r >= 1.0f) {
-            _mobiles[i].v.y = -_mobiles[i].v.y * e;
-            _mobiles[i].p.y = 1.0f - _mobiles[i].r;
-        }
-        
-        // Amortissement global (facultatif)
-        //_mobiles[i].v.x *= 0.95;//95f;
-        //_mobiles[i].v.y *= 0.95;//95f;
-        
-        // Mettre à jour la couleur en fonction de la pression (visualisation)
-        float pressure_ratio = _mobiles[i].pressure / (GAS_CONSTANT * REST_DENSITY);
-        pressure_ratio = fmaxf(0.0f, fminf(1.0f, pressure_ratio * 0.1f));
-        
-        _mobiles[i].color[0] = pressure_ratio;
-        _mobiles[i].color[1] = 0.2f + 0.8f * (1.0f - pressure_ratio);
-        _mobiles[i].color[2] = 1.0f - pressure_ratio;
-		// Si la densité est trop élevée, réduire la vitesse
-		//if (_mobiles[i].density > REST_DENSITY * 1.5f) {
-		//	_mobiles[i].v.x *= 0.85f;  // Réduire davantage la vitesse dans les zones denses
-		//	_mobiles[i].v.y *= 0.85f;
-		//}
-		/*
-		// Calculer la vitesse actuelle
-		float speed = sqrtf(_mobiles[i].v.x * _mobiles[i].v.x + _mobiles[i].v.y * _mobiles[i].v.y);
-    
-		// Si la vitesse dépasse le maximum, la réduire
-		if (speed > max_speed) {
-			float scale = max_speed / speed;
-			_mobiles[i].v.x *= scale;
-			_mobiles[i].v.y *= scale;
-		}
-		*/
-    }
-	for (int i = 0; i < _nb_mobiles; ++i) {
-		for (int j = i + 1; j < _nb_mobiles; ++j) {
-			float dx = _mobiles[j].p.x - _mobiles[i].p.x;
-			float dy = _mobiles[j].p.y - _mobiles[i].p.y;
-			float dist2 = dx * dx + dy * dy;
-			
-			// Somme des rayons
-			float sumRadii = _mobiles[i].r + _mobiles[j].r;
-			
-			// Test de collision
-			if (dist2 < sumRadii * sumRadii) {
-				float dist = sqrtf(dist2);
-				if (dist < 0.0001f) dist = 0.0001f; // éviter la division par zéro
-				
-				// Vecteur unitaire i -> j
-				float nx = dx / dist;
-				float ny = dy / dist;
-				
-				// Écarter les particules pour corriger le chevauchement
-				float overlap = 0.5f * (sumRadii - dist);
-				_mobiles[i].p.x -= nx * overlap;
-				_mobiles[i].p.y -= ny * overlap;
-				_mobiles[j].p.x += nx * overlap;
-				_mobiles[j].p.y += ny * overlap;
-				
-				// Vitesse relative dans la direction de la collision
-				float vx = _mobiles[j].v.x - _mobiles[i].v.x;
-				float vy = _mobiles[j].v.y - _mobiles[i].v.y;
-				float dot = vx * nx + vy * ny;
-				
-				// Si dot > 0, elles s'éloignent déjà ⇒ pas de correction supplémentaire
-				if (dot > 0.0f) continue;
-				
-				// Coefficient de restitution (rebond)
-				float restitution = 0.5f; // Ajustez selon l'effet rebond désiré
-				
-				// Impulsion
-				float impulse = -(1.0f + restitution) * dot;
-				// Masse = 1 pour les deux particules (dans votre code, MASS=1.0f)
-				impulse *= 0.5f; // Répartition égale si les masses sont égales
-				
-				// Appliquer l’impulsion
-				_mobiles[i].v.x -= nx * impulse;
-				_mobiles[i].v.y -= ny * impulse;
-				_mobiles[j].v.x += nx * impulse;
-				_mobiles[j].v.y += ny * impulse;
-			}
-		}
-	}
     rect_collide_all(_mobiles, _nb_mobiles, e);
 }
-	/*
-	const float seuil_collision = 0.05f; // seuil de vitesse pour la collision
 
-	for (int i = 0; i < _nb_mobiles; ++i){
-		int collision_sol = 0, collision = 0;
-		
-		_mobiles[i].p.x += _mobiles[i].v.x * dt;
-		_mobiles[i].p.y += _mobiles[i].v.y * dt;
-		//_mobiles[i].p.z += _mobiles[i].v.z * dt; //pour que ça soit en 2D
 
-		//collisions avec les murs en x
-		if (_mobiles[i].p.x - _mobiles[i].r <= -1.0f){
-			if (_mobiles[i].v.x < 0.0f)
-				_mobiles[i].v.x = -_mobiles[i].v.x;
-				_mobiles[i].p.x = -1.0f + _mobiles[i].r; // Repositionner
-			collision = 1;
-		}
-		if (_mobiles[i].p.x + _mobiles[i].r >= 1.0f){
-			if (_mobiles[i].v.x > 0.0f)
-				_mobiles[i].v.x = -_mobiles[i].v.x;
-				_mobiles[i].p.x = 1.0f - _mobiles[i].r; // Repositionner
-			collision = 1;
-		}
-		
-		////collision avec les murs en z
-		//if (_mobiles[i].p.z - _mobiles[i].r <= -1.0f){
-		//	if (_mobiles[i].v.z < 0.0f)
-		//		_mobiles[i].v.z = -_mobiles[i].v.z;
-		//		_mobiles[i].p.z = -1.0f + _mobiles[i].r; // Repositionner
-		//	collision = 1;
-		//}
-		//if (_mobiles[i].p.z + _mobiles[i].r >= 1.0f){
-		//	if (_mobiles[i].v.z > 0.0f)
-		//		_mobiles[i].v.z = -_mobiles[i].v.z;
-		//		_mobiles[i].p.z = 1.0f - _mobiles[i].r; // Repositionner
-		//	collision = 1;
-		//}
-		
-		//collision avec le sol
-		if (_mobiles[i].p.y - _mobiles[i].r <= -1.0f){
-			if (_mobiles[i].v.y < 0.0f)
-				_mobiles[i].v.y = -_mobiles[i].v.y;
-				_mobiles[i].p.y = -1.0f + _mobiles[i].r; // Repositionner
-			collision = 1;
-			collision_sol = 1;
-
-			// si la balle touche le sol et sa vitesse est inférieure au seuil
-			// on la stoppe
-			if (fabs(_mobiles[i].v.y) < seuil_collision){
-				_mobiles[i].v.y = 0.0f;
-				//_mobiles[i].p.y = -1.0f + _mobiles[i].r; // repositionne la balle au dessus du sol TODO changer ça pour les colision entre balles
-			}
-		}
-		//collision avec le plafond
-		if (_mobiles[i].p.y + _mobiles[i].r >= 1.0f){
-			if (_mobiles[i].v.y > 0.0f)
-				_mobiles[i].v.y = -_mobiles[i].v.y;
-				_mobiles[i].p.y = 1.0f - _mobiles[i].r; // Repositionner
-			collision = 1;
-		}
-
-		//application d'amortissement si collision
-		if (collision != 0){
-			_mobiles[i].v.x *= e;
-			_mobiles[i].v.y *= e;
-			_mobiles[i].v.z *= e;
-			
-			//si la vitesse est inférieure au seuil, on la met à 0
-			if(fabs(_mobiles[i].v.x) < seuil_collision)
-    		  _mobiles[i].v.x = 0.0f;
-    		if(fabs(_mobiles[i].v.y) < seuil_collision)
-    		  _mobiles[i].v.y = 0.0f;
-    		//if(fabs(_mobiles[i].v.z) < seuil_collision)
-    		//  _mobiles[i].v.z = 0.0f;
-    	}
-		if (collision_sol == 0){
-			_mobiles[i].v.x += _g.x * dt;
-			_mobiles[i].v.y += _g.y * dt;
-			//_mobiles[i].v.z += _g.z * dt;
-		}
-		//// Si la balle est au sol et n'a plus de vitesse horizontale significative,
-    	//// elle ne devrait plus bouger horizontalement
-    	//else if(_mobiles[i].v.y == 0.0f) {
-		//	_mobiles[i].v.x = 0.0f;
-		//	_mobiles[i].v.z = 0.0f;
-		//}
-		
-		// Si la balle est au sol et n'a plus de vitesse verticale significative
-		if (collision_sol && _mobiles[i].v.y == 0.0f) {
-			// Réduire progressivement la vitesse horizontale (friction)
-			_mobiles[i].v.x *= 0.98f;
-			//_mobiles[i].v.z *= 0.98f;
-
-			// Arrêter complètement si très lent
-			if (fabs(_mobiles[i].v.x) < seuil_collision)
-				_mobiles[i].v.x = 0.0f;
-			//if (fabs(_mobiles[i].v.z) < seuil_collision)
-			//	_mobiles[i].v.z = 0.0f;
-		}
-	}
-	//gestion des collisions entre balles
-    for (int i = 0; i < _nb_mobiles; ++i) {
-        for (int j = i + 1; j < _nb_mobiles; ++j) {
-            // Calculer la distance entre les centres des deux balles
-            float dx = _mobiles[j].p.x - _mobiles[i].p.x;
-            float dy = _mobiles[j].p.y - _mobiles[i].p.y;
-            //float dz = _mobiles[j].p.z - _mobiles[i].p.z;
-            
-            // Distance au carré (évite de calculer sqrt pour l'optimisation)
-            float distanceSquared = dx * dx + dy * dy; //+ dz * dz;
-            
-            // Somme des rayons
-            float sumRadii = _mobiles[i].r + _mobiles[j].r;
-            
-            // Test de collision - collision si la distance est inférieure à la somme des rayons
-            if (distanceSquared < sumRadii * sumRadii) {
-                // Calcul de la distance réelle
-                float distance = sqrt(distanceSquared);
-                
-                // Éviter division par zéro
-                if (distance == 0.0f) distance = 0.0001f;
-                
-                // Vecteur unitaire de la direction de collision (de i vers j)
-                float nx = dx / distance;
-                float ny = dy / distance;
-                //float nz = dz / distance;
-                
-                // Calculer le chevauchement pour repositionner les balles
-                float overlap = (sumRadii - distance) / 2.0f;
-                
-                // Repositionner les balles
-                _mobiles[i].p.x -= nx * overlap;
-                _mobiles[i].p.y -= ny * overlap;
-                //_mobiles[i].p.z -= nz * overlap;
-                
-                _mobiles[j].p.x += nx * overlap;
-                _mobiles[j].p.y += ny * overlap;
-                //_mobiles[j].p.z += nz * overlap;
-                
-                // Calcul de la vitesse relative dans la direction de collision
-                float vx = _mobiles[j].v.x - _mobiles[i].v.x;
-                float vy = _mobiles[j].v.y - _mobiles[i].v.y;
-                //float vz = _mobiles[j].v.z - _mobiles[i].v.z;
-                
-                // Projection de la vitesse relative sur la normale de collision
-                float dotProduct = nx * vx + ny * vy; //+ nz * vz;
-                
-                // Si les balles s'éloignent déjà, pas besoin de les rebondir
-                if (dotProduct >= 0.0f) continue;
-                
-                // Coefficient de restitution (rebond)
-                float restitution = e;
-                
-                // Calculer l'impulsion
-                float impulse = -(1.0f + restitution) * dotProduct;
-                
-                // Masse égale pour toutes les balles (on peut ajuster ici si nécessaire)
-                impulse /= 2.0f;
-                
-                // Appliquer l'impulsion aux vitesses
-                _mobiles[i].v.x -= nx * impulse;
-                _mobiles[i].v.y -= ny * impulse;
-                //_mobiles[i].v.z -= nz * impulse;
-                
-                _mobiles[j].v.x += nx * impulse;
-                _mobiles[j].v.y += ny * impulse;
-                //_mobiles[j].v.z += nz * impulse;
-            }
-        }
-	}
+// Fonction pour basculer entre les modes eau et espace
+void toggle_simulation_mode() {
+    SPACE_MODE = !SPACE_MODE; // Toggle the simulation mode
+    mobile_quit();
+    
+    if (SPACE_MODE) {
+        // Désactiver la gravité globale
+        _g.x = _g.y = _g.z = 0.0f;
+        // Initialiser en mode espace
+        space_init(1023);
+    } else {
+        // Réinitialiser en mode eau
+        mobile_init(1023);
+        // Rétablir la gravité vers le bas
+        _g.x = 0.0f; 
+        _g.y = -9.81f;
+        _g.z = 0.0f;
+    }
 }
-*/
+// Fonction principale de simulation modifiée pour sélectionner le mode
+void mobile_simu_with_mode_selection() {
+    if (SPACE_MODE) {
+        space_simulation();
+    } else {
+        mobile_simu();
+    }
+}
+
 void mobile_draw(void){
 	GLfloat *tmp = malloc(4 * _nb_mobiles * sizeof *tmp);
 	assert(tmp);
